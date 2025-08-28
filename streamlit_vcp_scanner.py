@@ -43,22 +43,51 @@ def _clean_fi_symbol(s: str) -> str:
 # --------------------------------------------------
 @st.cache_data(show_spinner=True)
 def get_sp500() -> pd.DataFrame:
-    # Primary GitHub dataset (community)
+    # Yritetään useita lähteitä; sarakenimet voivat vaihdella.
     urls = [
         "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv",
         "https://raw.githubusercontent.com/rahuljrw/S-and-P-500-companies/master/data/constituents.csv",
+        # varalähde: Wikipedia dump -tyylinen vaihtoehto (joskus eri schema)
+        "https://raw.githubusercontent.com/datasets/s-and-p-500/master/data/constituents.csv",
     ]
     for u in urls:
         df = fetch_csv(u)
-        if not df.empty and "Symbol" in df.columns:
-            out = df[["Symbol", "Name"]].rename(columns={"Symbol": "ticker", "Name": "name"})
-            out["ticker"] = out["ticker"].astype(str).str.strip().apply(_clean_us_symbol)
-            return out.dropna().drop_duplicates(subset=["ticker"]).reset_index(drop=True)
-    # Tiny static fallback (varmistaa, että appi ei jää tyhjäksi)
+        if df.empty:
+            continue
+        # normalisoi otsikot
+        cols = [str(c).strip().lower() for c in df.columns]
+        df.columns = cols
+
+        # etsi ticker-sarake
+        tick_col = None
+        for cand in ["symbol", "ticker"]:
+            if cand in cols:
+                tick_col = cand
+                break
+
+        # etsi nimi-sarake (vapaaehtoinen)
+        name_col = None
+        for cand in ["name", "security", "company", "companyname"]:
+            if cand in cols:
+                name_col = cand
+                break
+
+        if tick_col is not None:
+            tick = df[tick_col].astype(str).str.strip().apply(_clean_us_symbol)
+            name = df[name_col] if name_col else ""
+            out = pd.DataFrame({"ticker": tick, "name": name})
+            out = out.dropna().drop_duplicates(subset=["ticker"]).reset_index(drop=True)
+            # Poista mahdolliset tyhjät/oudot rivit
+            out = out[out["ticker"].str.len() > 0]
+            if not out.empty:
+                return out
+
+    # Viimeinen fallback ettei appi jää tyhjäksi
     fallback = pd.DataFrame(
         {"ticker": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "TSLA"], "name": [""] * 8}
     )
     return fallback
+
 
 @st.cache_data(show_spinner=True)
 def get_russell3000() -> pd.DataFrame:
